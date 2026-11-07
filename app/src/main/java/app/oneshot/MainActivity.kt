@@ -89,7 +89,7 @@ class MainActivity : Activity() {
         status = label("第一阶段原型：加密、密码验证与临时解密。")
         layout.addView(status)
         layout.addView(space(12))
-        layout.addView(label("提示：本版本尚未实现格式预览器。解密内容仅写入应用私有缓存，不会调用外部应用。"))
+        layout.addView(label("支持 UTF-8 文本与常见图片的应用内预览。解密内容仅写入应用私有缓存，不会调用外部应用。"))
         setContentView(layout)
     }
 
@@ -285,14 +285,58 @@ class MainActivity : Activity() {
             }
             layout.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         } else {
-            layout.addView(space(12))
-            layout.addView(label(
-                if (file.length() > maxPreviewBytes)
-                    "文件超过 2 MB，暂不直接预览。临时明文仍保存在应用私有缓存中。"
-                else
-                    "暂不支持此文件格式或字符编码的预览。当前版本支持 UTF-8 文本文件（最大 2 MB）。"
-            ))
-            layout.addView(space(12))
+            val imageOptions = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath, imageOptions)
+            if (imageOptions.outWidth > 0 && imageOptions.outHeight > 0) {
+                // Keep decoded images small enough for low-memory phones.
+                val maxDimension = 1280
+                var sample = 1
+                while (imageOptions.outWidth / sample > maxDimension ||
+                    imageOptions.outHeight / sample > maxDimension) {
+                    sample *= 2
+                }
+                val bitmap = try {
+                    android.graphics.BitmapFactory.Options().run {
+                        inSampleSize = sample
+                        inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                        android.graphics.BitmapFactory.decodeFile(file.absolutePath, this)
+                    }
+                } catch (_: OutOfMemoryError) {
+                    null
+                } catch (_: Exception) {
+                    null
+                }
+                if (bitmap != null) {
+                    layout.addView(label("图片预览"))
+                    val image = ImageView(this).apply {
+                        setImageBitmap(bitmap)
+                        scaleType = ImageView.ScaleType.FIT_CENTER
+                        adjustViewBounds = true
+                        setBackgroundColor(panel)
+                        contentDescription = "解密后的图片预览"
+                    }
+                    val scroll = ScrollView(this).apply {
+                        isFillViewport = true
+                        addView(image, android.view.ViewGroup.LayoutParams(-1, -2))
+                    }
+                    layout.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+                } else {
+                    layout.addView(space(12))
+                    layout.addView(label("识别到图片，但手机内存不足，无法完成预览。临时明文将在关闭页面时清理。"))
+                    layout.addView(space(12))
+                }
+            } else {
+                layout.addView(space(12))
+                layout.addView(label(
+                    if (file.length() > maxPreviewBytes)
+                        "文件超过 2 MB，且不是可识别的图片格式。当前文本预览上限为 2 MB。"
+                    else
+                        "暂不支持此文件格式或字符编码的预览。当前支持 UTF-8 文本和常见图片格式。"
+                ))
+                layout.addView(space(12))
+            }
         }
 
         layout.addView(actionButton("关闭并清理临时文件") {
