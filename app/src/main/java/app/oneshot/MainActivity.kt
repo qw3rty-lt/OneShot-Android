@@ -56,6 +56,7 @@ class MainActivity : Activity() {
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
         )
+        cleanupStaleTempFiles()
         showHome()
     }
 
@@ -487,6 +488,19 @@ class MainActivity : Activity() {
         return name
     }
 
+    // Remove abandoned plaintext cache files left by an earlier process death.
+    // Only files created by this app with the dedicated read_*.tmp naming scheme
+    // are touched; encrypted user documents are never scanned or deleted.
+    private fun cleanupStaleTempFiles() {
+        cacheDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.startsWith("read_") && file.name.endsWith(".tmp")) {
+                try {
+                    file.delete()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     private fun wipeTemp() {
         decryptedTemp?.let { f ->
             if (f.exists()) {
@@ -497,6 +511,16 @@ class MainActivity : Activity() {
             }
         }
         decryptedTemp = null
+    }
+
+    override fun onStop() {
+        // Do not leave the plaintext preview visible in the activity when it
+        // moves to the background. The next foreground visit starts at home.
+        if (decryptedTemp != null) {
+            wipeTemp()
+            showHome()
+        }
+        super.onStop()
     }
 
     override fun onDestroy() {
