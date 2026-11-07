@@ -281,7 +281,7 @@ class MainActivity : Activity() {
             preview.text = if (textContent.isBlank()) "（这是一个空文本文件）" else textContent
             val scroll = ScrollView(this).apply {
                 isFillViewport = true
-                addView(preview, ScrollView.LayoutParams(-1, -2))
+                addView(preview, android.view.ViewGroup.LayoutParams(-1, -2))
             }
             layout.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         } else {
