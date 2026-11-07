@@ -31,12 +31,14 @@ class MainActivity : Activity() {
     private var selectedName: String = ""
     private var decryptedTemp: File? = null
     private var selectedMode = ""
+    private var pendingExpiryDurationMillis = 24L * 60L * 60L * 1000L
 
     companion object {
         private const val PICK_SOURCE = 100
         private const val SAVE_CONTAINER = 101
         private const val PICK_CONTAINER = 102
-        private const val MAGIC = "ONESHOT1"
+        private const val MAGIC_V1 = "ONESHOT1"
+        private const val MAGIC_V2 = "ONESHOT2"
         private const val SALT_SIZE = 16
         private const val IV_SIZE = 12
         private const val ITERATIONS = 310_000
@@ -107,6 +109,22 @@ class MainActivity : Activity() {
             setBackgroundColor(panel)
         }
         layout.addView(password, LinearLayout.LayoutParams(-1, dp(54)))
+        var expiryChoice: Spinner? = null
+        if (mode == "encrypt") {
+            layout.addView(space(14))
+            layout.addView(label("文件有效期（从加密完成时开始计算）"))
+            val choices = listOf("1 小时", "24 小时（默认）", "7 天", "永不过期")
+            expiryChoice = Spinner(this).apply {
+                adapter = ArrayAdapter(
+                    this@MainActivity,
+                    android.R.layout.simple_spinner_dropdown_item,
+                    choices
+                )
+                setSelection(1)
+                setBackgroundColor(panel)
+            }
+            layout.addView(expiryChoice, LinearLayout.LayoutParams(-1, dp(50)))
+        }
         layout.addView(space(16))
         layout.addView(actionButton(if (mode == "encrypt") "继续选择保存位置" else "验证并解密") {
             val pass = password.text.toString()
@@ -123,6 +141,13 @@ class MainActivity : Activity() {
                     putExtra(Intent.EXTRA_TITLE, "$name.oneshot")
                 }
                 pendingPassword = pass
+                val durations = longArrayOf(
+                    60L * 60L * 1000L,
+                    24L * 60L * 60L * 1000L,
+                    7L * 24L * 60L * 60L * 1000L,
+                    0L
+                )
+                pendingExpiryDurationMillis = durations[expiryChoice?.selectedItemPosition ?: 1]
                 startActivityForResult(intent, SAVE_CONTAINER)
             } else {
                 decryptSelected(pass)
@@ -167,14 +192,18 @@ class MainActivity : Activity() {
                     contentResolver.openInputStream(selectedUri!!).use { input ->
                         contentResolver.openOutputStream(uri).use { output ->
                             if (input == null || output == null) error("无法打开文件")
-                            encryptStream(input, output, pendingPassword)
+                            val expiryAt = if (pendingExpiryDurationMillis == 0L) 0L
+                                else System.currentTimeMillis() + pendingExpiryDurationMillis
+                            encryptStream(input, output, pendingPassword, expiryAt)
                         }
                     }
                     pendingPassword = ""
+                    pendingExpiryDurationMillis = 24L * 60L * 60L * 1000L
                     toast("加密完成，已保存 .oneshot 文件")
                     showHome()
                 } catch (e: Exception) {
                     pendingPassword = ""
+                    pendingExpiryDurationMillis = 24L * 60L * 60L * 1000L
                     toast("加密失败：" + (e.message ?: "未知错误"))
                     showHome()
                 }
@@ -186,23 +215,37 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun encryptStream(input: InputStream, output: OutputStream, pass: String) {
+    private fun encryptStream(
+        input: InputStream,
+        output: OutputStream,
+        pass: String,
+        expiryAt: Long
+    ) {
         val random = SecureRandom()
         val salt = ByteArray(SALT_SIZE).also { random.nextBytes(it) }
         val iv = ByteArray(IV_SIZE).also { random.nextBytes(it) }
         val key = derive(pass, salt)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
-        DataOutputStream(BufferedOutputStream(output)).use { out ->
-            out.write(MAGIC.toByteArray(Charsets.US_ASCII))
-            out.writeByte(SALT_SIZE)
-            out.writeByte(IV_SIZE)
-            out.writeInt(ITERATIONS)
-            out.write(salt)
-            out.write(iv)
-            CipherOutputStream(out, cipher).use { encrypted ->
-                input.copyTo(encrypted, 64 * 1024)
-            }
+
+        // Authenticate the complete v2 header as GCM AAD.
+        val headerBuffer = ByteArrayOutputStream()
+        DataOutputStream(headerBuffer).use { header ->
+            header.write(MAGIC_V2.toByteArray(Charsets.US_ASCII))
+            header.writeByte(SALT_SIZE)
+            header.writeByte(IV_SIZE)
+            header.writeInt(ITERATIONS)
+            header.writeLong(expiryAt)
+            header.write(salt)
+            header.write(iv)
+        }
+        val headerBytes = headerBuffer.toByteArray()
+        cipher.updateAAD(headerBytes)
+
+        val bufferedOutput = BufferedOutputStream(output)
+        bufferedOutput.write(headerBytes)
+        CipherOutputStream(bufferedOutput, cipher).use { encrypted ->
+            input.copyTo(encrypted, 64 * 1024)
         }
     }
 
@@ -224,19 +267,38 @@ class MainActivity : Activity() {
             contentResolver.openInputStream(uri).use { raw ->
                 if (raw == null) error("无法读取文件")
                 DataInputStream(BufferedInputStream(raw)).use { input ->
-                    val magic = ByteArray(MAGIC.length)
+                    val magic = ByteArray(MAGIC_V2.length)
                     input.readFully(magic)
-                    if (String(magic, Charsets.US_ASCII) != MAGIC) error("不是有效的 OneShot 文件")
+                    val magicText = String(magic, Charsets.US_ASCII)
+                    val isV2 = magicText == MAGIC_V2
+                    if (!isV2 && magicText != MAGIC_V1) error("不是有效的 OneShot 文件")
                     val saltLen = input.readUnsignedByte()
                     val ivLen = input.readUnsignedByte()
                     val iterations = input.readInt()
+                    val expiryAt = if (isV2) input.readLong() else 0L
                     if (saltLen != SALT_SIZE || ivLen != IV_SIZE || iterations !in 100_000..1_000_000) {
                         error("文件头无效")
                     }
                     val salt = ByteArray(saltLen).also { input.readFully(it) }
                     val iv = ByteArray(ivLen).also { input.readFully(it) }
+                    if (isV2 && expiryAt != 0L && System.currentTimeMillis() >= expiryAt) {
+                        throw ExpiredFileException()
+                    }
                     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
                     cipher.init(Cipher.DECRYPT_MODE, derive(pass, salt), GCMParameterSpec(128, iv))
+                    if (isV2) {
+                        val headerBuffer = ByteArrayOutputStream()
+                        DataOutputStream(headerBuffer).use { header ->
+                            header.write(magic)
+                            header.writeByte(saltLen)
+                            header.writeByte(ivLen)
+                            header.writeInt(iterations)
+                            header.writeLong(expiryAt)
+                            header.write(salt)
+                            header.write(iv)
+                        }
+                        cipher.updateAAD(headerBuffer.toByteArray())
+                    }
                     FileOutputStream(temp).use { fileOut ->
                         CipherInputStream(input, cipher).use { encrypted ->
                             encrypted.copyTo(fileOut, 64 * 1024)
@@ -251,7 +313,11 @@ class MainActivity : Activity() {
             }
             decryptedTemp?.delete()
             decryptedTemp = temp
-            showDecryptedContent(temp)
+            showDecryptedContent(temp, readExpiryAt(uri))
+        } catch (e: ExpiredFileException) {
+            temp.delete()
+            toast("这个文件已过期，无法打开")
+            showHome()
         } catch (e: Exception) {
             temp.delete()
             toast("验证失败或文件损坏，请检查密码")
@@ -259,10 +325,37 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showDecryptedContent(file: File) {
+    private class ExpiredFileException : Exception()
+
+    private fun readExpiryAt(uri: Uri): Long {
+        contentResolver.openInputStream(uri).use { raw ->
+            if (raw == null) error("无法读取文件")
+            DataInputStream(BufferedInputStream(raw)).use { input ->
+                val magic = ByteArray(MAGIC_V2.length)
+                input.readFully(magic)
+                if (String(magic, Charsets.US_ASCII) != MAGIC_V2) return 0L
+                input.readUnsignedByte()
+                input.readUnsignedByte()
+                input.readInt()
+                return input.readLong()
+            }
+        }
+    }
+
+    private fun showDecryptedContent(file: File, expiryAt: Long) {
         val layout = baseLayout()
         layout.addView(section("解密成功"))
         layout.addView(label("文件大小：" + android.text.format.Formatter.formatFileSize(this, file.length())))
+        val expiryLabel = if (expiryAt == 0L) {
+            "有效期：永不过期"
+        } else {
+            val formatted = java.text.SimpleDateFormat(
+                "yyyy-MM-dd HH:mm",
+                java.util.Locale.getDefault()
+            ).format(java.util.Date(expiryAt))
+            "过期时间：$formatted"
+        }
+        layout.addView(label(expiryLabel))
         layout.addView(label("内容仅在 OneShot 内显示；离开此页面会清理临时明文。"))
 
         val preview = TextView(this).apply {
@@ -409,6 +502,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         wipeTemp()
         pendingPassword = ""
+        pendingExpiryDurationMillis = 24L * 60L * 60L * 1000L
         super.onDestroy()
     }
 
