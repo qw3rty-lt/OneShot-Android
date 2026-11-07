@@ -89,7 +89,7 @@ class MainActivity : Activity() {
         status = label("第一阶段原型：加密、密码验证与临时解密。")
         layout.addView(status)
         layout.addView(space(12))
-        layout.addView(label("支持 UTF-8 文本与常见图片的应用内预览。解密内容仅写入应用私有缓存，不会调用外部应用。"))
+        layout.addView(label("支持 UTF-8 文本与常见图片的应用内预览。成功打开后，本机将记录该文件为已使用。"))
         setContentView(layout)
     }
 
@@ -210,6 +210,17 @@ class MainActivity : Activity() {
         val uri = selectedUri ?: return
         val temp = File(cacheDir, "read_${System.currentTimeMillis()}.tmp")
         try {
+            // Fingerprint the complete encrypted container so renaming or moving it
+            // does not reset the local one-time-use record.
+            val fingerprint = fingerprintContainer(uri)
+            val recordKey = "used_$fingerprint"
+            val usageRecords = getSharedPreferences("oneshot_usage", MODE_PRIVATE)
+            if (usageRecords.getBoolean(recordKey, false)) {
+                temp.delete()
+                toast("这个文件已在本机打开过，不能再次使用")
+                showHome()
+                return
+            }
             contentResolver.openInputStream(uri).use { raw ->
                 if (raw == null) error("无法读取文件")
                 DataInputStream(BufferedInputStream(raw)).use { input ->
@@ -232,6 +243,11 @@ class MainActivity : Activity() {
                         }
                     }
                 }
+            }
+            // Persist only after authenticated decryption succeeds. A failed password
+            // therefore does not consume the file.
+            if (!usageRecords.edit().putBoolean(recordKey, true).commit()) {
+                error("无法保存本机使用记录")
             }
             decryptedTemp?.delete()
             decryptedTemp = temp
@@ -345,6 +361,20 @@ class MainActivity : Activity() {
             toast("已清理本机临时解密文件")
         })
         setContentView(layout)
+    }
+
+    private fun fingerprintContainer(uri: Uri): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        contentResolver.openInputStream(uri).use { input ->
+            if (input == null) error("无法读取加密文件")
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun derive(pass: String, salt: ByteArray): SecretKeySpec {
