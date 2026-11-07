@@ -4,11 +4,48 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Open shackle -->
     <path
         android:fillColor="@android:color/transparent"
-        android:strokeColor="#3F3F42"
-        android:strokeWidth="8.5"
+        android:strokeColor="#292936"
+        android:strokeWidth="5.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M26,16 L26,86 M26,16 L47,16 C76,16 76,47 47,47 L26,47 M45,47 L83,85 M63,66 L84,45" />
+        android:pathData="M35,47 L35,41 C35,23 69,21 70,41" />
+
+    <!-- Lock body -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#292936"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M31,48 L73,48 C77,48 80,51 80,55 L80,68 C80,72 77,75 73,75 L34,75 C30,75 28,72 28,68 L28,55 C28,51 30,48 34,48" />
+
+    <!-- Rx monogram -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#292936"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M39,55 L39,68 M39,55 L46,55 C53,55 53,63 46,63 L39,63 M46,63 L54,70 M57,61 L67,71 M67,61 L57,71" />
+
+    <!-- Violet orbital sweep -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#9855FF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M16,73 C30,89 57,88 78,72 C87,65 92,57 94,51" />
+
+    <!-- Soft highlight on the orbit -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#C18BFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:pathData="M20,76 C35,87 58,83 76,70" />
 </vector>
