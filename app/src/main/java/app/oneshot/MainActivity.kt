@@ -235,7 +235,7 @@ class MainActivity : Activity() {
             }
             decryptedTemp?.delete()
             decryptedTemp = temp
-            showDecryptedInfo(temp)
+            showDecryptedContent(temp)
         } catch (e: Exception) {
             temp.delete()
             toast("验证失败或文件损坏，请检查密码")
@@ -243,19 +243,63 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showDecryptedInfo(file: File) {
+    private fun showDecryptedContent(file: File) {
         val layout = baseLayout()
-        layout.addView(section("密码验证成功"))
-        layout.addView(label("文件已在 OneShot 私有缓存中临时解密。"))
-        layout.addView(label("大小：" + android.text.format.Formatter.formatFileSize(this, file.length())))
-        layout.addView(space(16))
-        layout.addView(actionButton("关闭并销毁本地临时文件") {
+        layout.addView(section("解密成功"))
+        layout.addView(label("文件大小：" + android.text.format.Formatter.formatFileSize(this, file.length())))
+        layout.addView(label("内容仅在 OneShot 内显示；离开此页面会清理临时明文。"))
+
+        val preview = TextView(this).apply {
+            textSize = 14f
+            setTextColor(white)
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            setBackgroundColor(panel)
+            setTextIsSelectable(false)
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        val maxPreviewBytes = 2L * 1024L * 1024L
+        val textContent = if (file.length() > maxPreviewBytes) {
+            null
+        } else {
+            try {
+                val bytes = file.readBytes()
+                if (bytes.any { it == 0.toByte() }) null else {
+                    val decoder = Charsets.UTF_8.newDecoder()
+                        .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    var decoded = decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                    if (decoded.startsWith("\uFEFF")) decoded = decoded.substring(1)
+                    decoded
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        if (textContent != null) {
+            layout.addView(label("文本预览（UTF-8）"))
+            preview.text = if (textContent.isBlank()) "（这是一个空文本文件）" else textContent
+            val scroll = ScrollView(this).apply {
+                isFillViewport = true
+                addView(preview, ScrollView.LayoutParams(-1, -2))
+            }
+            layout.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        } else {
+            layout.addView(space(12))
+            layout.addView(label(
+                if (file.length() > maxPreviewBytes)
+                    "文件超过 2 MB，暂不直接预览。临时明文仍保存在应用私有缓存中。"
+                else
+                    "暂不支持此文件格式或字符编码的预览。当前版本支持 UTF-8 文本文件（最大 2 MB）。"
+            ))
+            layout.addView(space(12))
+        }
+
+        layout.addView(actionButton("关闭并清理临时文件") {
             wipeTemp()
             showHome()
             toast("已清理本机临时解密文件")
         })
-        layout.addView(space(8))
-        layout.addView(label("当前阶段只验证加密与解密流程，尚未提供内容预览。请勿将此原型用于保存唯一副本的重要资料。"))
         setContentView(layout)
     }
 
