@@ -1,24 +1,45 @@
-# OneShot Android — Phase 1 prototype
+# OneShot Android
 
-Dark purple, Simplified Chinese Android prototype.
+[简体中文](README_CN.md) | **English**
 
-## Phase 1 features
-- Pick any source file using Android Storage Access Framework.
-- Encrypt into `.oneshot` using AES-256-GCM.
-- Password-based key derivation with PBKDF2-HMAC-SHA256 (310,000 iterations).
-- Verify password and decrypt to the app-private cache.
-- No network permission and no external app handoff.
+## Features
 
-## Build
-Open this folder in Android Studio (Giraffe or newer), allow Gradle sync, then build:
-`app > Tasks > build > assembleDebug`
+- **Local File Encryption**: Select files and encrypt them into `.oneshot` files.
+- **Password Protection**: Protect files with password-based encryption and decryption.
+- **Text Preview**: View UTF-8 text directly within the app.
+- **Image Preview**: View images in the app with automatic downscaling to reduce memory usage.
+- **File Expiration**: Supports 1 hour, 24 hours, 7 days, and no expiration.
+- **One-Time Use**: Records a file fingerprint after successful decryption to prevent the same file from being opened again on this device.
+- **Automatic Cleanup**: Removes temporary plaintext files when leaving the preview, when the app goes to the background, and on the next launch.
+- **Privacy Protection**: Uses Android `FLAG_SECURE` to block screenshots and protect the app preview in the recent-apps screen.
+- **Offline Operation**: No account or network connection required.
 
-Or push to GitHub and run the included Actions workflow. Download the `OneShot-debug` artifact.
+## Encryption Scheme
 
-## Important limitations of this alpha
-- This is an encryption/decryption proof of concept, not a finished secure messenger.
-- It does not yet preview decrypted content.
-- It does not yet persist a one-time-consumed marker, nor implement the final lifecycle policy.
-- The temporary plaintext file is deleted when the Activity is destroyed or the user taps the cleanup button. Flash storage deletion is not guaranteed to be forensic erasure.
-- A copied encrypted container can be opened again on another device. Strict cross-device one-time access requires an online key service or trusted hardware.
-- Do not use this alpha for irreplaceable or highly sensitive data.
+| Item | Scheme |
+|---|---|
+| Symmetric Encryption | AES-256-GCM |
+| Key Derivation | PBKDF2-HMAC-SHA256 |
+| Iterations | 310,000 |
+| Key Length | 256 bits |
+| Salt | Randomly generated, 16 bytes |
+| IV | Randomly generated, 12 bytes |
+| GCM Authentication Tag | 128 bits |
+
+The `ONESHOT2` file format authenticates header metadata, including expiration information, using GCM AAD.
+
+Decryption compatibility with the older `ONESHOT1` format is retained.
+
+## File Expiration & One-Time Use
+
+- The expiration period starts when file encryption is completed.
+- Files are checked for expiration before decryption.
+- A local usage record is saved only after successful decryption.
+- SHA-256 fingerprints identify the same file even after it has been renamed or moved.
+
+## Compatibility
+
+- Minimum Android version: Android 8.0 (API 26).
+- Text preview limit: 2 MB.
+- Images are automatically downscaled for preview.
+- Any file type can be encrypted, but not all file types can be previewed within the app.
